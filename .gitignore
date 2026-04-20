@@ -1,0 +1,56 @@
+# ========== UNITY GENERATED FOLDERS ==========
+
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+UserSettings/
+
+# ========== UNITY CACHE FILES ==========
+
+*.csproj
+*.unityproj
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# ========== UNITY3D GENERATED META ==========
+
+*.apk
+*.aab
+*.unitypackage
+
+# ========== CRASH / LOG FILES ==========
+
+sysinfo.txt
+
+# ========== IDE (VS / VSCode / Rider) ==========
+
+.vscode/
+.vs/
+.idea/
+*.sln.iml
+
+# ========== OS FILES ==========
+
+.DS_Store
+Thumbs.db
+
+# ========== IL2CPP ==========
+
+il2cppOutput/
+
+# ========== ADDRESSABLES / CACHE ==========
+
+/ServerData
