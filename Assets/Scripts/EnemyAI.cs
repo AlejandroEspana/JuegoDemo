@@ -47,6 +47,7 @@ public class EnemyAI : MonoBehaviour
     float lastAttackTime = -999f;
     float currentSpeedX;
     float stunTimer;
+    bool hasDealtDamage; // Para poder funcionar con o sin Animation Events
 
     // Hashes del Animator
     static readonly int HashSpeedX   = Animator.StringToHash("SpeedX");
@@ -162,32 +163,52 @@ public class EnemyAI : MonoBehaviour
         if (playerController != null && playerController.IsInvulnerable()) return;
 
         lastAttackTime = Time.time;
+        hasDealtDamage = false;
 
-        if (anim != null)
-        {
-            anim.SetTrigger(HashIsAttack);
-            // El daño se aplicará mediante el Animation Event "DealDamage".
-        }
-        else
-        {
-            DealDamage(); // Fallback inmediato si no hay animador
-        }
+        if (anim != null) anim.SetTrigger(HashIsAttack);
+
+        // Corrutina que da una ventana de 0.2s antes de atacar (Evita que requieras configurar el Animation Event)
+        StartCoroutine(AttackFallbackCoroutine());
+    }
+
+    System.Collections.IEnumerator AttackFallbackCoroutine()
+    {
+        yield return new WaitForSeconds(0.2f);
+        if (!hasDealtDamage) DealDamage();
     }
 
     /// <summary>
-    /// Llamado por el Animation Event del enemigo en el frame de impacto.
+    /// Llamado por el Animation Event del enemigo en el frame de impacto, o por la corrutina si no existe evento.
     /// </summary>
     public void DealDamage()
     {
+        hasDealtDamage = true; // Impedir causar doble daño
+
         if (attackPoint != null)
         {
-            Collider2D[] hits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius, playerLayerMask);
-            foreach (Collider2D hit in hits)
+            if (playerLayerMask == 0)
             {
-                if (hit.TryGetComponent(out PlayerHealth ph))
+                // Si olvidaron configurar el Layermask en el inspector, buscar usando Tag
+                Collider2D[] allHits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius);
+                foreach (Collider2D hit in allHits)
                 {
-                    Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
-                    ph.TakeDamage(damage, hitDirection);
+                    if (hit.CompareTag("Player") && hit.TryGetComponent(out PlayerHealth ph))
+                    {
+                        Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
+                        ph.TakeDamage(damage, hitDirection);
+                    }
+                }
+            }
+            else
+            {
+                Collider2D[] hits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius, playerLayerMask);
+                foreach (Collider2D hit in hits)
+                {
+                    if (hit.TryGetComponent(out PlayerHealth ph))
+                    {
+                        Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
+                        ph.TakeDamage(damage, hitDirection);
+                    }
                 }
             }
         }

@@ -376,21 +376,36 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public void DealDamage()
     {
-        if (attackPoint == null) return;
-
-        Collider2D[] hits = Physics2D.OverlapCircleAll(
-            attackPoint.position,
-            attackRadius,
-            enemyLayers
-        );
-
-        foreach (Collider2D hit in hits)
+        if (attackPoint == null) 
         {
-            if (hit.TryGetComponent(out EnemyHealth eh))
+            Debug.LogWarning("¡Asegúrate de haber asignado el 'Attack Point' en el script PlayerController en el Inspector!");
+            return;
+        }
+
+        // Si el LayerMask de enemigos no fue configurado en el inspector (es 0/Nothing), usamos un rastreo por Layer universal filtrando por Tag
+        if (enemyLayers == 0)
+        {
+            Collider2D[] allHits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius);
+            foreach (Collider2D hit in allHits)
             {
-                // Calculamos la dirección del golpe para el empuje
-                Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
-                eh.TakeDamage(damage, hitDirection);
+                if (hit.CompareTag("Enemy") && hit.TryGetComponent(out EnemyHealth eh))
+                {
+                    Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
+                    eh.TakeDamage(damage, hitDirection);
+                }
+            }
+        }
+        else
+        {
+            Collider2D[] hits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius, enemyLayers);
+            foreach (Collider2D hit in hits)
+            {
+                if (hit.TryGetComponent(out EnemyHealth eh))
+                {
+                    // Calculamos la dirección del golpe para el empuje
+                    Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
+                    eh.TakeDamage(damage, hitDirection);
+                }
             }
         }
     }
