@@ -1,66 +1,237 @@
 using UnityEngine;
 
+/// <summary>
+/// IA del enemigo: detecta, persigue y ataca al jugador.
+/// Requiere layers "Enemy" y "Player" configurados en el proyecto.
+/// </summary>
+[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(SpriteRenderer))]
 public class EnemyAI : MonoBehaviour
 {
-    public float speed = 2f;
-    public float detectionRange = 6f;
-    public float attackRange = 1.2f;
-    public int damage = 1;
-    public float attackCooldown = 1f;
+    // ─────────────────────────────────────────
+    //  INSPECTOR
+    // ─────────────────────────────────────────
 
-    private Transform player;
-    private Rigidbody2D rb;
+    [Header("Movimiento")]
+    [SerializeField] float speed          = 2f;
+    [SerializeField] float accelerationTime = 0.06f;
 
-    private float lastAttackTime;
+    [Header("Detección")]
+    [SerializeField] float detectionRange = 6f;
+    [SerializeField] float attackRange    = 1.2f;
+
+    [Header("Ataque")]
+    [SerializeField] int   damage         = 1;
+    [SerializeField] float attackCooldown = 1f;
+    [SerializeField] Transform attackPoint;
+    [SerializeField] float attackRadius = 0.8f;
+    [SerializeField] LayerMask playerLayerMask;
+
+    [Header("Animación")]
+    [SerializeField] Animator anim;
+
+    // ─────────────────────────────────────────
+    //  ESTADO INTERNO
+    // ─────────────────────────────────────────
+
+    enum State { Idle, Chase, Attack }
+    State currentState = State.Idle;
+
+    Transform      player;
+    PlayerHealth   playerHealth;
+    PlayerController playerController;
+
+    Rigidbody2D    rb;
+    SpriteRenderer sr;
+
+    float lastAttackTime = -999f;
+    float currentSpeedX;
+    float stunTimer;
+
+    // Hashes del Animator
+    static readonly int HashSpeedX   = Animator.StringToHash("SpeedX");
+    static readonly int HashIsAttack = Animator.StringToHash("Attack");
+
+    // ─────────────────────────────────────────
+    //  UNITY LIFECYCLE
+    // ─────────────────────────────────────────
+
+    void Awake()
+    {
+        rb = GetComponent<Rigidbody2D>();
+        sr = GetComponent<SpriteRenderer>();
+
+        if (anim == null)
+            anim = GetComponent<Animator>();
+    }
 
     void Start()
     {
-        rb = GetComponent<Rigidbody2D>();
-
+        // Buscar jugador una sola vez
         GameObject obj = GameObject.FindGameObjectWithTag("Player");
-        if (obj != null)
+        if (obj == null)
         {
-            player = obj.transform;
+            Debug.LogWarning("[EnemyAI] No se encontró objeto con tag 'Player'.");
+            return;
         }
+
+        player            = obj.transform;
+        playerHealth      = obj.GetComponent<PlayerHealth>();
+        playerController  = obj.GetComponent<PlayerController>();
     }
 
     void Update()
     {
         if (player == null) return;
 
-        float distance = Vector2.Distance(transform.position, player.position);
-
-        if (distance <= detectionRange)
+        if (stunTimer > 0f)
         {
-            Move();
+            stunTimer -= Time.deltaTime;
+            currentSpeedX = rb.linearVelocity.x; // Sincronizar par que no frene el empuje
+            UpdateAnimations();
+            return;
+        }
 
-            if (distance <= attackRange)
+        UpdateState();
+        ExecuteState();
+        UpdateAnimations();
+    }
+
+    public void ApplyStun(float duration)
+    {
+        stunTimer = duration;
+    }
+
+    // ─────────────────────────────────────────
+    //  MÁQUINA DE ESTADOS
+    // ─────────────────────────────────────────
+
+    void UpdateState()
+    {
+        float dist = Vector2.Distance(transform.position, player.position);
+
+        if (dist > detectionRange)
+            currentState = State.Idle;
+        else if (dist <= attackRange)
+            currentState = State.Attack;
+        else
+            currentState = State.Chase;
+    }
+
+    void ExecuteState()
+    {
+        switch (currentState)
+        {
+            case State.Idle:   HandleIdle();   break;
+            case State.Chase:  HandleChase();  break;
+            case State.Attack: HandleAttack(); break;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    //  COMPORTAMIENTOS
+    // ─────────────────────────────────────────
+
+    void HandleIdle()
+    {
+        // Desacelerar suavemente hasta parar
+        currentSpeedX     = Mathf.Lerp(currentSpeedX, 0f, Time.deltaTime);
+        rb.linearVelocity = new Vector2(currentSpeedX, rb.linearVelocity.y);
+    }
+
+    void HandleChase()
+    {
+        float dir = Mathf.Sign(player.position.x - transform.position.x);
+
+        currentSpeedX     = Mathf.Lerp(currentSpeedX, dir * speed, Time.deltaTime / accelerationTime);
+        rb.linearVelocity = new Vector2(currentSpeedX, rb.linearVelocity.y);
+
+        // Girar sprite según dirección
+        sr.flipX = dir < 0f;
+    }
+
+    void HandleAttack()
+    {
+        // Parar al atacar
+        currentSpeedX     = Mathf.Lerp(currentSpeedX, 0f, Time.deltaTime / accelerationTime);
+        rb.linearVelocity = new Vector2(currentSpeedX, rb.linearVelocity.y);
+
+        if (Time.time < lastAttackTime + attackCooldown) return;
+
+        // No iniciar ataque si el jugador está invulnerable (dash)
+        if (playerController != null && playerController.IsInvulnerable()) return;
+
+        lastAttackTime = Time.time;
+
+        if (anim != null)
+        {
+            anim.SetTrigger(HashIsAttack);
+            // El daño se aplicará mediante el Animation Event "DealDamage".
+        }
+        else
+        {
+            DealDamage(); // Fallback inmediato si no hay animador
+        }
+    }
+
+    /// <summary>
+    /// Llamado por el Animation Event del enemigo en el frame de impacto.
+    /// </summary>
+    public void DealDamage()
+    {
+        if (attackPoint != null)
+        {
+            Collider2D[] hits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius, playerLayerMask);
+            foreach (Collider2D hit in hits)
             {
-                Attack();
+                if (hit.TryGetComponent(out PlayerHealth ph))
+                {
+                    Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
+                    ph.TakeDamage(damage, hitDirection);
+                }
             }
         }
         else
         {
-            rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
+            // Comportamiento antiguo por si no han configurado el Attack Point
+            if (playerHealth != null)
+            {
+                float dist = Vector2.Distance(transform.position, player.position);
+                if (dist <= attackRange)
+                {
+                    Vector2 hitDirection = (player.position - transform.position).normalized;
+                    playerHealth.TakeDamage(damage, hitDirection);
+                }
+            }
         }
     }
 
-    void Move()
+    // ─────────────────────────────────────────
+    //  ANIMACIONES
+    // ─────────────────────────────────────────
+
+    void UpdateAnimations()
     {
-        Vector2 dir = (player.position - transform.position).normalized;
-        rb.linearVelocity = new Vector2(dir.x * speed, rb.linearVelocity.y);
+        if (anim == null) return;
+        anim.SetFloat(HashSpeedX, Mathf.Abs(currentSpeedX));
     }
 
-    void Attack()
+    // ─────────────────────────────────────────
+    //  GIZMOS
+    // ─────────────────────────────────────────
+
+    void OnDrawGizmosSelected()
     {
-        if (Time.time < lastAttackTime + attackCooldown) return;
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, detectionRange);
 
-        lastAttackTime = Time.time;
+        Gizmos.color = Color.magenta;
+        Gizmos.DrawWireSphere(transform.position, attackRange);
 
-        PlayerHealth ph = player.GetComponent<PlayerHealth>();
-        if (ph != null)
+        if (attackPoint != null)
         {
-            ph.TakeDamage(damage);
+            Gizmos.color = Color.red;
+            Gizmos.DrawWireSphere(attackPoint.position, attackRadius);
         }
     }
 }

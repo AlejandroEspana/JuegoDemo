@@ -2,86 +2,199 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections;
 
+/// <summary>
+/// Controlador principal del jugador.
+/// Maneja movimiento, salto, dash y combate con animaciones fluidas.
+/// </summary>
+[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(Collider2D))]
+[RequireComponent(typeof(SpriteRenderer))]
+[RequireComponent(typeof(Animator))]
 public class PlayerController : MonoBehaviour
 {
+    // ─────────────────────────────────────────
+    //  INSPECTOR
+    // ─────────────────────────────────────────
+
+    [Header("Referencias")]
+    [SerializeField] Transform groundCheck;
+    [SerializeField] Transform attackPoint;
+    [SerializeField] LayerMask groundLayer;
+    [SerializeField] LayerMask enemyLayers;
+
+    [Header("Escala Dinámica")]
+    [SerializeField] float baseHeight = 2f;
+
     [Header("Movimiento")]
-    public float speed = 5f;
-    private Vector2 movement;
-    private bool isPressingDown;
-    private bool isFacingRight = true;
+    [SerializeField] float baseSpeed        = 6f;
+    [SerializeField] float accelerationTime = 0.08f;
+    [SerializeField] float decelerationTime = 0.05f;
 
     [Header("Salto")]
-    public float jumpForce = 7f;
-    public Transform groundCheck;
-    public float groundRadius = 0.2f;
-    public LayerMask groundLayer;
-    private bool isGrounded;
+    [SerializeField] float baseJumpForce    = 12f;
+    [SerializeField] float coyoteTime       = 0.12f;
+    [SerializeField] float jumpBufferTime   = 0.12f;
+    [SerializeField] float fallMultiplier   = 2.5f;
+    [SerializeField] float lowJumpMultiplier = 2f;
 
     [Header("Dash")]
-    public float dashSpeed = 12f;
-    public float dashTime = 0.2f;
-    public float dashCooldown = 2f;
-    private bool isDashing = false;
-    private bool canDash = true;
+    [SerializeField] float baseDashSpeed     = 18f;
+    [SerializeField] float dashDuration      = 0.15f;
+    [SerializeField] float dashCooldown      = 2f;
+    [SerializeField] float dashBlinkInterval = 0.05f;
 
     [Header("Ataque")]
-    public Transform attackPoint;
-    public float attackRadius = 0.5f;
-    public LayerMask enemyLayers;
-    public int damage = 1;
-    public float attackCooldown = 1f;
-    private bool canAttack = true;
+    [SerializeField] float baseAttackRadius = 0.6f;
+    [SerializeField] int   damage           = 1;
+    [SerializeField] float attackCooldown   = 0.5f;
 
-    private Rigidbody2D rb;
-    private Collider2D playerCollider;
-    private SpriteRenderer sprite;
+    [Header("Ground Check")]
+    [SerializeField] float baseGroundRadius = 0.2f;
 
-    private bool isInvulnerable = false;
+    // ─────────────────────────────────────────
+    //  VALORES ESCALADOS
+    // ─────────────────────────────────────────
 
-    public float dashBlinkInterval = 0.05f;
+    float speed;
+    float jumpForce;
+    float dashSpeed;
+    float attackRadius;
+    float groundRadius;
+    float scaleMultiplier;
 
-    // 🔥 Layers
+    // ─────────────────────────────────────────
+    //  ESTADO INTERNO
+    // ─────────────────────────────────────────
+
+    // Movimiento
+    Vector2 inputDir;
+    float   currentSpeedX;
+    bool    isFacingRight = true;
+    bool    isPressingDown;
+
+    // Salto
+    bool  isGrounded;
+    float coyoteTimeCounter;
+    float jumpBufferCounter;
+    bool  jumpHeld;
+
+    // Dash
+    bool isDashing;
+    bool canDash = true;
+
+    // Ataque
+    bool            canAttack = true;
+    bool            isAttacking;
+    AttackDirection currentAttackDir;
+
+    // Invulnerabilidad
+    bool isInvulnerable;
+    float knockbackTimer;
+
+    // Capas
     int playerLayer;
     int enemyLayer;
 
+    // Componentes cacheados
+    Rigidbody2D    rb;
+    Collider2D     col;
+    SpriteRenderer sr;
+    Animator       anim;
+
+    // WaitForSeconds cacheados — sin garbage collection
+    WaitForSeconds waitDashDuration;
+    WaitForSeconds waitDashCooldown;
+    WaitForSeconds waitDashBlink;
+    WaitForSeconds waitAttackCooldown;
+    WaitForSeconds waitPlatformIgnore;
+
+    // Hashes del Animator — más rápido que strings en Update
+    static readonly int HashSpeed       = Animator.StringToHash("Speed");
+    static readonly int HashIsGrounded  = Animator.StringToHash("IsGrounded");
+    static readonly int HashIsDashing   = Animator.StringToHash("IsDashing");
+    static readonly int HashVerticalVel = Animator.StringToHash("VerticalVel");
+    static readonly int HashAttack      = Animator.StringToHash("Attack");
+    static readonly int HashAttackDir   = Animator.StringToHash("AttackDir");
+
+    enum AttackDirection { Neutral = 0, Up = 1, Down = 2 }
+
+    // ─────────────────────────────────────────
+    //  UNITY LIFECYCLE
+    // ─────────────────────────────────────────
+
     void Awake()
     {
-        rb = GetComponent<Rigidbody2D>();
-        playerCollider = GetComponent<Collider2D>();
-        sprite = GetComponent<SpriteRenderer>();
+        rb   = GetComponent<Rigidbody2D>();
+        col  = GetComponent<Collider2D>();
+        sr   = GetComponent<SpriteRenderer>();
+        anim = GetComponent<Animator>();
 
         playerLayer = LayerMask.NameToLayer("Player");
-        enemyLayer = LayerMask.NameToLayer("Enemy");
+        enemyLayer  = LayerMask.NameToLayer("Enemy");
+
+        if (playerLayer == -1 || enemyLayer == -1)
+            Debug.LogError("[PlayerController] Crea los layers 'Player' y 'Enemy'.");
+
+        CalculateDynamicScale();
+        CacheWaitForSeconds();
     }
 
     void Update()
     {
-        if (groundCheck != null)
-        {
-            isGrounded = Physics2D.OverlapCircle(groundCheck.position, groundRadius, groundLayer);
-        }
+        if (knockbackTimer > 0f) knockbackTimer -= Time.deltaTime;
 
+        CheckGround();
+        HandleCoyoteTime();
+        HandleJumpBuffer();
+        HandleGravityModifier();
+        UpdateAnimations();
         Flip();
     }
 
     void FixedUpdate()
     {
-        if (!isDashing)
-        {
-            rb.linearVelocity = new Vector2(movement.x * speed, rb.linearVelocity.y);
-        }
+        if (!isDashing && knockbackTimer <= 0f)
+            ApplyMovement();
     }
 
-    // ===== INPUT =====
+    // ─────────────────────────────────────────
+    //  INICIALIZACIÓN
+    // ─────────────────────────────────────────
+
+    void CalculateDynamicScale()
+    {
+        float characterHeight = sr.bounds.size.y;
+        scaleMultiplier = characterHeight / baseHeight;
+
+        speed        = baseSpeed        * scaleMultiplier;
+        jumpForce    = baseJumpForce    * scaleMultiplier;
+        dashSpeed    = baseDashSpeed    * scaleMultiplier;
+        attackRadius = baseAttackRadius * scaleMultiplier;
+        groundRadius = baseGroundRadius * scaleMultiplier;
+    }
+
+    void CacheWaitForSeconds()
+    {
+        waitDashDuration   = new WaitForSeconds(dashDuration);
+        waitDashCooldown   = new WaitForSeconds(dashCooldown);
+        waitDashBlink      = new WaitForSeconds(dashBlinkInterval);
+        waitAttackCooldown = new WaitForSeconds(attackCooldown);
+        waitPlatformIgnore = new WaitForSeconds(0.5f);
+    }
+
+    // ─────────────────────────────────────────
+    //  INPUT (New Input System)
+    // ─────────────────────────────────────────
 
     public void OnMove(InputValue value)
     {
-        movement = value.Get<Vector2>();
-        isPressingDown = movement.y < -0.5f;
+        inputDir       = value.Get<Vector2>();
+        isPressingDown = inputDir.y < -0.5f;
     }
 
     public void OnJump(InputValue value)
     {
+        jumpHeld = value.isPressed;
         if (!value.isPressed) return;
 
         if (isPressingDown && isGrounded)
@@ -90,132 +203,220 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (isGrounded)
-        {
-            rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
-        }
+        jumpBufferCounter = jumpBufferTime;
     }
 
     public void OnDash(InputValue value)
     {
         if (value.isPressed && canDash && !isDashing)
-        {
-            StartCoroutine(Dash());
-        }
+            StartCoroutine(DashRoutine());
     }
 
     public void OnAttack(InputValue value)
     {
-        if (value.isPressed && canAttack)
+        if (!value.isPressed || !canAttack || isAttacking) return;
+        StartCoroutine(AttackRoutine());
+    }
+
+    // ─────────────────────────────────────────
+    //  MOVIMIENTO
+    // ─────────────────────────────────────────
+
+    void ApplyMovement()
+    {
+        float targetSpeed = inputDir.x * speed;
+        float smoothTime  = Mathf.Abs(targetSpeed) > 0.01f ? accelerationTime : decelerationTime;
+
+        currentSpeedX     = Mathf.Lerp(currentSpeedX, targetSpeed, Time.fixedDeltaTime / smoothTime);
+        rb.linearVelocity = new Vector2(currentSpeedX, rb.linearVelocity.y);
+    }
+
+    void Flip()
+    {
+        if      (inputDir.x >  0.01f) SetFacing(true);
+        else if (inputDir.x < -0.01f) SetFacing(false);
+    }
+
+    void SetFacing(bool facingRight)
+    {
+        if (isFacingRight == facingRight) return;
+
+        isFacingRight = facingRight;
+        sr.flipX      = !facingRight;
+
+        if (attackPoint == null) return;
+        Vector3 pos = attackPoint.localPosition;
+        pos.x = Mathf.Abs(pos.x) * (facingRight ? 1 : -1);
+        attackPoint.localPosition = pos;
+    }
+
+    // ─────────────────────────────────────────
+    //  SALTO
+    // ─────────────────────────────────────────
+
+    void CheckGround()
+    {
+        if (groundCheck == null) return;
+        isGrounded = Physics2D.OverlapCircle(groundCheck.position, groundRadius, groundLayer);
+    }
+
+    void HandleCoyoteTime()
+    {
+        if (isGrounded)
+            coyoteTimeCounter = coyoteTime;
+        else
+            coyoteTimeCounter -= Time.deltaTime;
+    }
+
+    void HandleJumpBuffer()
+    {
+        if (jumpBufferCounter <= 0f) return;
+
+        jumpBufferCounter -= Time.deltaTime;
+
+        if (coyoteTimeCounter > 0f)
         {
-            StartCoroutine(AttackCoroutine());
+            ExecuteJump();
+            jumpBufferCounter = 0f;
+            coyoteTimeCounter = 0f;
         }
     }
 
-    // ===== DASH =====
-
-    IEnumerator Dash()
+    void ExecuteJump()
     {
-        isDashing = true;
-        canDash = false;
+        rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
+    }
+
+    void HandleGravityModifier()
+    {
+        if (rb.linearVelocity.y < 0f)
+        {
+            // Caída más pesada y natural
+            rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (fallMultiplier - 1f) * Time.deltaTime;
+        }
+        else if (rb.linearVelocity.y > 0f && !jumpHeld)
+        {
+            // Salto corto al soltar el botón
+            rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (lowJumpMultiplier - 1f) * Time.deltaTime;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    //  DASH
+    // ─────────────────────────────────────────
+
+    IEnumerator DashRoutine()
+    {
+        isDashing      = true;
+        canDash        = false;
         isInvulnerable = true;
 
-        // 🔥 ATRAVESAR ENEMIGOS
-        Physics2D.IgnoreLayerCollision(playerLayer, enemyLayer, true);
+        IgnoreEnemyCollision(true);
+        StartCoroutine(DashBlinkRoutine());
 
-        StartCoroutine(DashBlink());
-
-        Vector2 dir = movement.normalized;
+        Vector2 dir = inputDir.normalized;
         if (dir == Vector2.zero)
             dir = isFacingRight ? Vector2.right : Vector2.left;
 
         rb.linearVelocity = dir * dashSpeed;
 
-        yield return new WaitForSeconds(dashTime);
+        yield return waitDashDuration;
 
-        isDashing = false;
+        isDashing      = false;
         isInvulnerable = false;
+        sr.enabled     = true;
 
-        // 🔥 VOLVER A COLISIONAR
-        Physics2D.IgnoreLayerCollision(playerLayer, enemyLayer, false);
+        IgnoreEnemyCollision(false);
 
-        sprite.enabled = true;
-
-        yield return new WaitForSeconds(dashCooldown);
+        yield return waitDashCooldown;
         canDash = true;
     }
 
-    IEnumerator DashBlink()
+    IEnumerator DashBlinkRoutine()
     {
         while (isDashing)
         {
-            sprite.enabled = !sprite.enabled;
-            yield return new WaitForSeconds(dashBlinkInterval);
+            sr.enabled = !sr.enabled;
+            yield return waitDashBlink;
         }
-
-        sprite.enabled = true;
+        sr.enabled = true;
     }
 
-    // ===== ATAQUE =====
-
-    IEnumerator AttackCoroutine()
+    void IgnoreEnemyCollision(bool ignore)
     {
-        canAttack = false;
-
-        Attack();
-
-        yield return new WaitForSeconds(attackCooldown);
-
-        canAttack = true;
+        if (playerLayer != -1 && enemyLayer != -1)
+            Physics2D.IgnoreLayerCollision(playerLayer, enemyLayer, ignore);
     }
 
-    void Attack()
+    // ─────────────────────────────────────────
+    //  ATAQUE
+    // ─────────────────────────────────────────
+
+    IEnumerator AttackRoutine()
     {
-        Collider2D[] enemies = Physics2D.OverlapCircleAll(
+        canAttack   = false;
+        isAttacking = true;
+
+        currentAttackDir = inputDir.y >  0.5f ? AttackDirection.Up
+                         : inputDir.y < -0.5f ? AttackDirection.Down
+                         :                      AttackDirection.Neutral;
+
+        anim.SetInteger(HashAttackDir, (int)currentAttackDir);
+        anim.SetTrigger(HashAttack);
+
+        yield return waitAttackCooldown;
+
+        isAttacking = false;
+        canAttack   = true;
+    }
+
+    /// <summary>
+    /// Llamado por Animation Event en el frame de impacto.
+    /// ¡NO borrar! Lo invoca el Animator automáticamente.
+    /// </summary>
+    public void DealDamage()
+    {
+        if (attackPoint == null) return;
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(
             attackPoint.position,
             attackRadius,
             enemyLayers
         );
 
-        foreach (Collider2D enemy in enemies)
+        foreach (Collider2D hit in hits)
         {
-            EnemyHealth eh = enemy.GetComponent<EnemyHealth>();
-            if (eh != null)
+            if (hit.TryGetComponent(out EnemyHealth eh))
             {
-                eh.TakeDamage(damage);
+                // Calculamos la dirección del golpe para el empuje
+                Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
+                eh.TakeDamage(damage, hitDirection);
             }
         }
     }
 
-    // ===== GIRO =====
+    // ─────────────────────────────────────────
+    //  ANIMACIONES
+    // ─────────────────────────────────────────
 
-    void Flip()
+    void UpdateAnimations()
     {
-        if (movement.x > 0)
-        {
-            sprite.flipX = false;
-            isFacingRight = true;
-        }
-        else if (movement.x < 0)
-        {
-            sprite.flipX = true;
-            isFacingRight = false;
-        }
-
-        if (attackPoint != null)
-        {
-            attackPoint.localPosition = new Vector3(
-                Mathf.Abs(attackPoint.localPosition.x) * (isFacingRight ? 1 : -1),
-                attackPoint.localPosition.y,
-                attackPoint.localPosition.z
-            );
-        }
+        // Speed normalizado (0=quieto · 1=velocidad máx) con damping suave
+        float normalizedSpeed = speed > 0f ? Mathf.Abs(currentSpeedX) / speed : 0f;
+        anim.SetFloat(HashSpeed,       normalizedSpeed, 0.05f, Time.deltaTime);
+        anim.SetFloat(HashVerticalVel, rb.linearVelocity.y);
+        anim.SetBool(HashIsGrounded,   isGrounded);
+        anim.SetBool(HashIsDashing,    isDashing);
     }
 
-    // ===== PLATAFORMAS =====
+    // ─────────────────────────────────────────
+    //  PLATAFORMAS ONE-WAY
+    // ─────────────────────────────────────────
 
     IEnumerator DisablePlatformCollision()
     {
+        if (groundCheck == null) yield break;
+
         Collider2D platform = Physics2D.OverlapCircle(
             groundCheck.position,
             groundRadius,
@@ -224,33 +425,58 @@ public class PlayerController : MonoBehaviour
 
         if (platform != null && platform.CompareTag("Platform"))
         {
-            Physics2D.IgnoreCollision(playerCollider, platform, true);
-
-            yield return new WaitForSeconds(0.5f);
-
-            Physics2D.IgnoreCollision(playerCollider, platform, false);
+            Physics2D.IgnoreCollision(col, platform, true);
+            yield return waitPlatformIgnore;
+            Physics2D.IgnoreCollision(col, platform, false);
         }
     }
 
-    // ===== INVULNERABILIDAD =====
+    // ─────────────────────────────────────────
+    //  API PÚBLICA
+    // ─────────────────────────────────────────
 
-    public bool IsInvulnerable()
+    public bool IsInvulnerable() => isInvulnerable;
+    public bool IsGrounded()     => isGrounded;
+    public bool IsDashing()      => isDashing;
+    
+    public void ApplyKnockbackState(float duration)
     {
-        return isInvulnerable;
+        knockbackTimer = duration;
+        currentSpeedX = rb.linearVelocity.x; 
     }
+
+    // ─────────────────────────────────────────
+    //  GIZMOS
+    // ─────────────────────────────────────────
 
     void OnDrawGizmosSelected()
     {
+        float scaleMult = 1f;
+
+        // Si estamos en el editor y el juego no está corriendo, estimamos el escalado
+        if (!Application.isPlaying && baseHeight > 0f)
+        {
+            SpriteRenderer spriteRend = GetComponent<SpriteRenderer>();
+            if (spriteRend != null && spriteRend.bounds.size.y > 0)
+                scaleMult = spriteRend.bounds.size.y / baseHeight;
+        }
+        else if (Application.isPlaying)
+        {
+            scaleMult = scaleMultiplier;
+        }
+
         if (attackPoint != null)
         {
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(attackPoint.position, attackRadius);
+            Gizmos.color = Color.red;
+            float r = Application.isPlaying ? attackRadius : baseAttackRadius * scaleMult;
+            Gizmos.DrawWireSphere(attackPoint.position, r);
         }
 
         if (groundCheck != null)
         {
-            Gizmos.color = Color.red;
-            Gizmos.DrawWireSphere(groundCheck.position, groundRadius);
+            Gizmos.color = Color.blue;
+            float rG = Application.isPlaying ? groundRadius : baseGroundRadius * scaleMult;
+            Gizmos.DrawWireSphere(groundCheck.position, rG);
         }
     }
 }

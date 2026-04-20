@@ -11,16 +11,21 @@ public class PlayerHealth : MonoBehaviour
 
     public float blinkDuration = 1f;
     public float blinkInterval = 0.1f;
+    public float knockbackForce = 6f;
+
+    private Rigidbody2D rb;
 
     void Start()
     {
         currentHealth = maxHealth;
         controller = GetComponent<PlayerController>();
         sprite = GetComponent<SpriteRenderer>();
+        rb = GetComponent<Rigidbody2D>();
     }
 
-    public void TakeDamage(int damage)
+    public void TakeDamage(int damage, Vector2 hitDirection = default)
     {
+        // 🛡️ Invulnerabilidad (dash)
         if (controller != null && controller.IsInvulnerable())
         {
             return;
@@ -29,6 +34,13 @@ public class PlayerHealth : MonoBehaviour
         currentHealth -= damage;
 
         StartCoroutine(Blink());
+
+        if (hitDirection != Vector2.zero && rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.AddForce(hitDirection.normalized * knockbackForce, ForceMode2D.Impulse);
+            if (controller != null) controller.ApplyKnockbackState(0.3f);
+        }
 
         if (currentHealth <= 0)
         {
