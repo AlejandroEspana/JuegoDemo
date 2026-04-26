@@ -86,6 +86,7 @@ public class PlayerController : MonoBehaviour
     bool            canAttack = true;
     bool            isAttacking;
     AttackDirection currentAttackDir;
+    bool            hasDealtDamage;
 
     // Invulnerabilidad
     bool isInvulnerable;
@@ -242,12 +243,16 @@ public class PlayerController : MonoBehaviour
         if (isFacingRight == facingRight) return;
 
         isFacingRight = facingRight;
-        sr.flipX      = !facingRight;
+        
+        // Volvemos a flipX: Evita que el collider "salte" y se atasque dentro del enemigo.
+        sr.flipX = !facingRight;
 
-        if (attackPoint == null) return;
-        Vector3 pos = attackPoint.localPosition;
-        pos.x = Mathf.Abs(pos.x) * (facingRight ? 1 : -1);
-        attackPoint.localPosition = pos;
+        if (attackPoint != null)
+        {
+            Vector3 pos = attackPoint.localPosition;
+            pos.x = Mathf.Abs(pos.x) * (facingRight ? 1f : -1f);
+            attackPoint.localPosition = pos;
+        }
     }
 
     // ─────────────────────────────────────────
@@ -356,6 +361,7 @@ public class PlayerController : MonoBehaviour
     {
         canAttack   = false;
         isAttacking = true;
+        hasDealtDamage = false;
 
         currentAttackDir = inputDir.y >  0.5f ? AttackDirection.Up
                          : inputDir.y < -0.5f ? AttackDirection.Down
@@ -364,10 +370,19 @@ public class PlayerController : MonoBehaviour
         anim.SetInteger(HashAttackDir, (int)currentAttackDir);
         anim.SetTrigger(HashAttack);
 
+        StartCoroutine(AttackFallbackCoroutine());
+
         yield return waitAttackCooldown;
 
         isAttacking = false;
         canAttack   = true;
+    }
+
+    IEnumerator AttackFallbackCoroutine()
+    {
+        // Respaldo en caso de que no exista el Animation Event en la animación de ataque
+        yield return new WaitForSeconds(0.15f);
+        if (!hasDealtDamage) DealDamage();
     }
 
     /// <summary>
@@ -376,38 +391,61 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public void DealDamage()
     {
+        if (hasDealtDamage) return;
+        hasDealtDamage = true;
+
         if (attackPoint == null) 
         {
-            Debug.LogWarning("¡Asegúrate de haber asignado el 'Attack Point' en el script PlayerController en el Inspector!");
+            Debug.LogWarning("[Player] No hay 'Attack Point' asignado. Aplicando daño en área (fallback).");
+            Collider2D[] fallbackHits = Physics2D.OverlapCircleAll(transform.position, attackRadius * 1.5f);
+            foreach (Collider2D hit in fallbackHits)
+            {
+                if (hit.CompareTag("Enemy"))
+                {
+                    IDamageable damageable = GetDamageable(hit.gameObject);
+                    if (damageable != null)
+                    {
+                        Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
+                        damageable.TakeDamage(damage, hitDirection);
+                        Debug.Log("[Player] Golpe exitoso a: " + hit.name);
+                    }
+                }
+            }
             return;
         }
 
-        // Si el LayerMask de enemigos no fue configurado en el inspector (es 0/Nothing), usamos un rastreo por Layer universal filtrando por Tag
-        if (enemyLayers == 0)
+        Collider2D[] hits = enemyLayers == 0 
+            ? Physics2D.OverlapCircleAll(attackPoint.position, attackRadius)
+            : Physics2D.OverlapCircleAll(attackPoint.position, attackRadius, enemyLayers);
+
+        bool hitAnything = false;
+        foreach (Collider2D hit in hits)
         {
-            Collider2D[] allHits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius);
-            foreach (Collider2D hit in allHits)
+            if (enemyLayers != 0 || hit.CompareTag("Enemy"))
             {
-                if (hit.CompareTag("Enemy") && hit.TryGetComponent(out EnemyHealth eh))
+                IDamageable damageable = GetDamageable(hit.gameObject);
+                if (damageable != null)
                 {
                     Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
-                    eh.TakeDamage(damage, hitDirection);
+                    damageable.TakeDamage(damage, hitDirection);
+                    hitAnything = true;
+                    Debug.Log("[Player] Golpe exitoso a: " + hit.name);
                 }
             }
         }
-        else
+
+        if (!hitAnything)
         {
-            Collider2D[] hits = Physics2D.OverlapCircleAll(attackPoint.position, attackRadius, enemyLayers);
-            foreach (Collider2D hit in hits)
-            {
-                if (hit.TryGetComponent(out EnemyHealth eh))
-                {
-                    // Calculamos la dirección del golpe para el empuje
-                    Vector2 hitDirection = (hit.transform.position - transform.position).normalized;
-                    eh.TakeDamage(damage, hitDirection);
-                }
-            }
+            Debug.Log("[Player] El ataque no golpeó a ningún enemigo con componente IDamageable o Tag adecuado.");
         }
+    }
+
+    IDamageable GetDamageable(GameObject obj)
+    {
+        IDamageable d = obj.GetComponent<IDamageable>();
+        if (d == null) d = obj.GetComponentInParent<IDamageable>();
+        if (d == null) d = obj.GetComponentInChildren<IDamageable>();
+        return d;
     }
 
     // ─────────────────────────────────────────
