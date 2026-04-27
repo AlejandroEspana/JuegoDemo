@@ -5,7 +5,7 @@ using System.Collections;
 /// Gestiona la vida del enemigo, feedback visual al recibir daño y muerte.
 /// </summary>
 [RequireComponent(typeof(SpriteRenderer))]
-public class EnemyHealth : MonoBehaviour
+public class EnemyHealth : MonoBehaviour, IDamageable
 {
     // ─────────────────────────────────────────
     //  INSPECTOR
