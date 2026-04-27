@@ -10,7 +10,7 @@ using System.Collections;
 [RequireComponent(typeof(Collider2D))]
 [RequireComponent(typeof(SpriteRenderer))]
 [RequireComponent(typeof(Animator))]
-public class PlayerController : MonoBehaviour
+public class PlayerController : MonoBehaviour, ISaveable
 {
     // ─────────────────────────────────────────
     //  INSPECTOR
@@ -496,6 +496,29 @@ public class PlayerController : MonoBehaviour
     {
         knockbackTimer = duration;
         currentSpeedX = rb.linearVelocity.x; 
+    }
+
+    // ─────────────────────────────────────────
+    //  SISTEMA DE GUARDADO (ISaveable)
+    // ─────────────────────────────────────────
+
+    public void PopulateSaveData(SaveData a_SaveData)
+    {
+        // Guardar la posición actual
+        a_SaveData.playerPosition = transform.position;
+    }
+
+    public void LoadFromSaveData(SaveData a_SaveData)
+    {
+        // Al usar Rigidbody2D, es importante actualizar tanto el Transform como la posición del RB
+        // para evitar que el motor de físicas "teletransporte" al jugador de vuelta a su posición previa.
+        transform.position = a_SaveData.playerPosition;
+        
+        if (rb != null)
+        {
+            rb.position = a_SaveData.playerPosition;
+            rb.linearVelocity = Vector2.zero; // Reseteamos cualquier inercia o caída
+        }
     }
 
     // ─────────────────────────────────────────

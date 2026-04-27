@@ -19,11 +19,14 @@ public class EnemyProjectile : MonoBehaviour
     {
         rb = GetComponent<Rigidbody2D>();
         
-        // Hacemos que el Rigidbody ignore la gravedad para viajar verdaderamente en línea recta
-        rb.gravityScale = 0f; 
+        // 1. Hacemos que sea Cinemático para que el Dash (ni ninguna otra fuerza física) pueda empujarlo
+        rb.bodyType = RigidbodyType2D.Kinematic;
         
-        // Ponemos detección continua para que no atraviese colisionadores delgados
-        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+        // 2. Nos aseguramos de que su colisionador actúe como Trigger para que atraviese en lugar de rebotar
+        if (TryGetComponent(out Collider2D col))
+        {
+            col.isTrigger = true;
+        }
     }
 
     void Start()

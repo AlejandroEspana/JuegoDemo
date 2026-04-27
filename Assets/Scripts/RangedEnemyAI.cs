@@ -50,6 +50,7 @@ public class RangedEnemyAI : MonoBehaviour
     float lastAttackTime = -999f;
     float currentSpeedX;
     float stunTimer;
+    bool isShooting = false; // Bloquea el voltearse mientras dispara
     
     static readonly int HashSpeedX   = Animator.StringToHash("SpeedX");
     static readonly int HashIsAttack = Animator.StringToHash("Attack");
@@ -183,14 +184,18 @@ public class RangedEnemyAI : MonoBehaviour
         currentSpeedX = Mathf.Lerp(currentSpeedX, 0f, Time.deltaTime / accelerationTime);
         rb.linearVelocity = new Vector2(currentSpeedX, rb.linearVelocity.y);
 
-        // Asegurar que mire al jugador
-        bool isFacingLeft = (player.position.x < transform.position.x);
-        SetFacing(isFacingLeft);
+        // Si NO está a mitad de la animación de disparo, sigue apuntando al jugador
+        if (!isShooting)
+        {
+            bool isFacingLeft = (player.position.x < transform.position.x);
+            SetFacing(isFacingLeft);
+        }
 
         // Control de tiempo para no disparar balas infinitas de golpe
-        if (Time.time >= lastAttackTime + attackCooldown)
+        if (Time.time >= lastAttackTime + attackCooldown && !isShooting)
         {
             lastAttackTime = Time.time;
+            isShooting = true;
 
             if (anim != null) anim.SetTrigger(HashIsAttack);
 
@@ -203,6 +208,7 @@ public class RangedEnemyAI : MonoBehaviour
     {
         yield return new WaitForSeconds(0.2f); // Tiempo hasta que la bala sale del arma
         SpawnProjectile();
+        isShooting = false; // Ya puede volver a voltearse
     }
 
     void SpawnProjectile()
@@ -221,8 +227,9 @@ public class RangedEnemyAI : MonoBehaviour
 
         if (proj.TryGetComponent(out EnemyProjectile projScript))
         {
-            // Vector dirección exacto hacia el cuerpo del jugador
-            Vector2 shootDirection = (player.position - spawnPos).normalized;
+            // Cambiamos el aim-bot diagonal por un disparo 100% horizontal basado en hacia dónde mira el enemigo.
+            // Así evitamos que dispare por la espalda si el jugador salta encima.
+            Vector2 shootDirection = sr.flipX ? Vector2.left : Vector2.right;
             projScript.Setup(shootDirection);
         }
     }
@@ -233,16 +240,16 @@ public class RangedEnemyAI : MonoBehaviour
 
     void SetFacing(bool isFacingLeft)
     {
-        if (sr.flipX != isFacingLeft)
-        {
-            sr.flipX = isFacingLeft;
+        // Actualizamos sr.flipX siempre, y corregimos el firePoint basándonos en eso.
+        sr.flipX = isFacingLeft;
 
-            if (firePoint != null)
-            {
-                Vector3 pos = firePoint.localPosition;
-                pos.x = Mathf.Abs(pos.x) * (isFacingLeft ? -1f : 1f);
-                firePoint.localPosition = pos;
-            }
+        if (firePoint != null)
+        {
+            Vector3 pos = firePoint.localPosition;
+            // Si el sprite original (isFacingLeft=false) mira a la derecha,
+            // al ser true (mirar izquierda), la x debe ser negativa.
+            pos.x = Mathf.Abs(pos.x) * (isFacingLeft ? -1f : 1f);
+            firePoint.localPosition = pos;
         }
     }
 
