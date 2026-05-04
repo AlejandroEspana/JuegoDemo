@@ -4,7 +4,7 @@ public class SaveMenuController : MonoBehaviour
 {
     [Header("Slots Array")]
     [Tooltip("Arrastra aquí los GameObjects que tienen el script SaveSlotUI")]
-    public SaveSlotUI[] saveSlots;
+    [SerializeField] private SaveSlotUI[] saveSlots;
 
     private void Start()
     {

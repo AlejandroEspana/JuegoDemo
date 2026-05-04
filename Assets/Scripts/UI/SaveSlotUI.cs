@@ -6,10 +6,10 @@ public class SaveSlotUI : MonoBehaviour
 {
     [Header("Configuración del Slot")]
     [Tooltip("El ID debe ser único por botón, ej: 1, 2, 3...")]
-    public int slotID;
+    [SerializeField] private int slotID;
     
     [Header("Referencias UI")]
-    public TextMeshProUGUI slotStatusText;
+    [SerializeField] private TextMeshProUGUI slotStatusText;
     public Button slotButton;
 
     private SaveMenuController menuController;

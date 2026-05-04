@@ -36,6 +36,7 @@ public class PlayerController : MonoBehaviour, ISaveable
     [SerializeField] float jumpBufferTime   = 0.12f;
     [SerializeField] float fallMultiplier   = 2.5f;
     [SerializeField] float lowJumpMultiplier = 2f;
+    [SerializeField] float jumpCooldown     = 0.1f;
 
     [Header("Dash")]
     [SerializeField] float baseDashSpeed     = 18f;
@@ -76,6 +77,7 @@ public class PlayerController : MonoBehaviour, ISaveable
     bool  isGrounded;
     float coyoteTimeCounter;
     float jumpBufferCounter;
+    float jumpCooldownTimer;
     bool  jumpHeld;
 
     // Dash
@@ -136,6 +138,13 @@ public class PlayerController : MonoBehaviour, ISaveable
         if (playerLayer == -1 || enemyLayer == -1)
             Debug.LogError("[PlayerController] Crea los layers 'Player' y 'Enemy'.");
 
+        // Prevenir "Edge Snapping" (impulsos hacia arriba al rozar esquinas)
+        PhysicsMaterial2D noFrictionMat = new PhysicsMaterial2D("NoFriction");
+        noFrictionMat.friction = 0f;
+        noFrictionMat.bounciness = 0f;
+        rb.sharedMaterial = noFrictionMat;
+        if (col != null) col.sharedMaterial = noFrictionMat;
+
         CalculateDynamicScale();
         CacheWaitForSeconds();
     }
@@ -143,6 +152,7 @@ public class PlayerController : MonoBehaviour, ISaveable
     void Update()
     {
         if (knockbackTimer > 0f) knockbackTimer -= Time.deltaTime;
+        if (jumpCooldownTimer > 0f) jumpCooldownTimer -= Time.deltaTime;
 
         CheckGround();
         HandleCoyoteTime();
@@ -226,9 +236,14 @@ public class PlayerController : MonoBehaviour, ISaveable
     void ApplyMovement()
     {
         float targetSpeed = inputDir.x * speed;
-        float smoothTime  = Mathf.Abs(targetSpeed) > 0.01f ? accelerationTime : decelerationTime;
 
-        currentSpeedX     = Mathf.Lerp(currentSpeedX, targetSpeed, Time.fixedDeltaTime / smoothTime);
+        // Calcular aceleración vs desaceleración constante
+        float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) 
+            ? (speed / accelerationTime) 
+            : (speed / decelerationTime);
+
+        // MoveTowards es independiente del framerate y más preciso que Lerp
+        currentSpeedX = Mathf.MoveTowards(currentSpeedX, targetSpeed, accelRate * Time.fixedDeltaTime);
         rb.linearVelocity = new Vector2(currentSpeedX, rb.linearVelocity.y);
     }
 
@@ -262,6 +277,14 @@ public class PlayerController : MonoBehaviour, ISaveable
     void CheckGround()
     {
         if (groundCheck == null) return;
+        
+        // Evitar detectar suelo inmediatamente después de saltar o al atravesar plataformas hacia arriba
+        if (jumpCooldownTimer > 0f)
+        {
+            isGrounded = false;
+            return;
+        }
+
         isGrounded = Physics2D.OverlapCircle(groundCheck.position, groundRadius, groundLayer);
     }
 
@@ -290,6 +313,7 @@ public class PlayerController : MonoBehaviour, ISaveable
     void ExecuteJump()
     {
         rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
+        jumpCooldownTimer = jumpCooldown;
     }
 
     void HandleGravityModifier()

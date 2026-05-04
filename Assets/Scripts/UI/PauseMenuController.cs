@@ -6,11 +6,11 @@ public class PauseMenuController : MonoBehaviour
 {
     [Header("UI References")]
     [Tooltip("Arrastra aquí el objeto Panel que contiene tu Menú de Pausa")]
-    public GameObject pausePanel;
+    [SerializeField] private GameObject pausePanel;
     
     [Header("Configuración")]
     [Tooltip("El nombre exacto de la escena de tu menú principal")]
-    public string mainMenuSceneName = "MainMenu";
+    [SerializeField] private string mainMenuSceneName = "MainMenu";
 
     private bool isPaused = false;
 

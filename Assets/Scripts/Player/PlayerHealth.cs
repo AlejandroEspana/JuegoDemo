@@ -3,15 +3,15 @@ using System.Collections;
 
 public class PlayerHealth : MonoBehaviour, IDamageable
 {
-    public int maxHealth = 5;
+    [SerializeField] private int maxHealth = 5;
     private int currentHealth;
 
     private PlayerController controller;
     private SpriteRenderer sprite;
 
-    public float blinkDuration = 1f;
-    public float blinkInterval = 0.1f;
-    public float knockbackForce = 6f;
+    [SerializeField] private float blinkDuration = 1f;
+    [SerializeField] private float blinkInterval = 0.1f;
+    [SerializeField] private float knockbackForce = 6f;
 
     private Rigidbody2D rb;
 
